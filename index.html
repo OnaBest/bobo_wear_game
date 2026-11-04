@@ -248,7 +248,13 @@ $('#title').innerHTML=[...'Bobo 穿衣服'].map((c,i)=>c===' '?'&nbsp;':`<span s
 
 /* ================= audio ================= */
 let AC=null,master=null,musicGain=null,musicOn=true,musicTimer=null;
-function ac(){if(!AC){AC=new (window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=.8;master.connect(AC.destination);
+function silentUrl(){const sr=8000,n=sr/2,b=new ArrayBuffer(44+n*2),v=new DataView(b);const w=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+  w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+  return URL.createObjectURL(new Blob([b],{type:'audio/wav'}))}
+let keepAlive=null;
+function iosUnlock(){try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}
+  try{if(!keepAlive){keepAlive=new Audio(silentUrl());keepAlive.loop=true;keepAlive.setAttribute('playsinline','');}keepAlive.play().catch(()=>{})}catch(e){}}
+function ac(){iosUnlock();if(!AC){AC=new (window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=.8;master.connect(AC.destination);
   musicGain=AC.createGain();musicGain.gain.value=.0;musicGain.connect(master)}if(AC.state==='suspended')AC.resume();return AC}
 function tone(f,t0,d,type='sine',g=.25,dest){const a=ac(),o=a.createOscillator(),v=a.createGain();o.type=type;o.frequency.setValueAtTime(f,t0);
   v.gain.setValueAtTime(0,t0);v.gain.linearRampToValueAtTime(g,t0+.01);v.gain.exponentialRampToValueAtTime(.0001,t0+d);o.connect(v);v.connect(dest||master);o.start(t0);o.stop(t0+d+.05);return o}
