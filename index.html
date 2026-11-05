@@ -88,6 +88,8 @@ img{-webkit-user-drag:none;pointer-events:none}
 #bubble .it{display:inline-block;height:96px;vertical-align:middle;margin:0 4px}
 #mic{left:760px;top:600px;width:180px;height:180px;background:#ff5a5f;border:7px solid #1b1b1b;display:flex;align-items:center;justify-content:center;z-index:30;transition:opacity .3s,transform .12s}
 #mic svg{width:86px;height:86px}
+#mic.tapme{animation:tapme 1s ease-in-out infinite}
+@keyframes tapme{0%,100%{transform:scale(1)}50%{transform:scale(1.14) rotate(-4deg)}}
 #mic.listen{animation:micpulse 1.1s ease-in-out infinite;background:#2fbf71}
 #mic .ring{position:absolute;inset:-7px;border-radius:50%;border:7px solid #2fbf71;opacity:0}
 #mic.listen .ring{animation:ring 1.3s ease-out infinite}
@@ -109,7 +111,7 @@ img{-webkit-user-drag:none;pointer-events:none}
 #endStars svg.show{animation:bigstar .6s forwards}
 #againBtn{left:60px;top:430px;width:200px;height:110px;font-size:44px;font-weight:600;background:#ff7a2e;border:6px solid #1b1b1b}
 #menuBtn{left:290px;top:430px;width:200px;height:110px;font-size:44px;font-weight:600;background:#3aa0ff;border:6px solid #1b1b1b}
-#tip{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);max-width:1100px;padding:14px 34px;border-radius:999px;background:rgba(20,30,25,.78);color:#fff;font-size:36px;font-weight:600;text-align:center;z-index:55;transition:opacity .3s,transform .3s;white-space:nowrap}
+#tip{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);max-width:1100px;padding:14px 34px;border-radius:999px;background:rgba(20,30,25,.78);color:#fff;font-size:36px;font-weight:600;text-align:center;z-index:55;transition:opacity .3s,transform .3s;width:max-content;max-width:1150px}
 #tip.off{opacity:0;transform:translateX(-50%) translateY(20px)}
 #checkBtn{right:30px;bottom:26px;height:70px;padding:0 30px;font-size:30px;font-weight:600;background:#fff8e6;color:#1b1b1b;border:5px solid #1b1b1b}
 #checkPanel{position:absolute;left:250px;top:60px;width:1100px;height:780px;background:#fff8e6;border:7px solid #1b1b1b;border-radius:40px;z-index:95;box-shadow:0 16px 0 rgba(0,0,0,.3);transition:opacity .25s,transform .25s}
@@ -361,13 +363,14 @@ function listen(ids,ms=7000){
     if(!SR){res({ok:false,text:'',err:'nosr'});return}
     const r=new SR();rec=r;r.lang='zh-CN';r.interimResults=true;r.maxAlternatives=5;r.continuous=false;
     let all='',found=[],ended=false;
-    const fin=(err)=>{if(ended)return;ended=true;listeningNow=false;setMusicVol();$('#mic').classList.remove('listen');clearTimeout(to);try{r.abort()}catch(e){}res({ok:found.length>0,found,text:all,err})};
+    const fin=(err)=>{if(ended)return;ended=true;listeningNow=false;try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}try{if(AC&&AC.state!=='running')AC.resume().catch(()=>{})}catch(e){}setMusicVol();$('#mic').classList.remove('listen');clearTimeout(to);try{r.abort()}catch(e){}res({ok:found.length>0,found,text:all,err})};
     r.onresult=e=>{let txt=[];for(let i=0;i<e.results.length;i++){for(let j=0;j<e.results[i].length;j++)txt.push(e.results[i][j].transcript)}
       all=e.results[e.results.length-1][0].transcript;$('#heard').textContent='Heard: '+all;
       const f=findItems(txt.join('|'),ids);if(f.length){found=f;if(ids.length===1)fin()}};
     r.onerror=e=>fin(e.error);r.onend=()=>fin();
     const to=setTimeout(()=>fin('timeout'),ms);
     $('#heard').textContent='';
+    stopVoice();try{if(navigator.audioSession)navigator.audioSession.type='play-and-record'}catch(e){}
     try{r.start();listeningNow=true;setMusicVol();SFX.listen();$('#mic').classList.add('listen')}catch(e){fin('start')}
   });
 }
@@ -515,13 +518,23 @@ async function level1(t){
 /* ---------- shared: listen loop ---------- */
 let skipResolve=null,micResolve=null;
 $('#skipBtn').onclick=()=>{SFX.click();stopListen();if(skipResolve)skipResolve()};
-$('#mic').onclick=()=>{if(micResolve&&!listeningNow)micResolve()};
+const IS_TOUCH=(window.matchMedia&&matchMedia('(pointer:coarse)').matches)||('ontouchstart' in window);
+let micAction=null;
+$('#mic').onclick=()=>{gestureUnlock();if(listeningNow)return;
+  if(micAction){const f=micAction;micAction=null;$('#mic').classList.remove('tapme');f();return}
+  if(micResolve)micResolve()};
 const waitMic=()=>new Promise(r=>micResolve=r);
 async function listenLoop(t,ids,{model,hint}){
   let fails=0;
   while(alive(t)){
     $('#mic').classList.remove('hidden');
-    const res=await Promise.race([listen(ids),new Promise(r=>skipResolve=()=>r({skip:true}))]);
+    const skipP=new Promise(r=>skipResolve=()=>r({skip:true}));
+    let res;
+    if(IS_TOUCH){
+      $('#mic').classList.add('tapme');
+      res=await Promise.race([new Promise(r=>{micAction=()=>r(listen(ids))}),skipP]);
+      micAction=null;$('#mic').classList.remove('tapme');
+    }else res=await Promise.race([listen(ids),skipP]);
     if(!alive(t))return null;
     if(res.skip){stopListen();return null}
     if(res.err==='nosr'){await narrate('Please open this game in Chrome or Edge on a computer to use the microphone.');return null}
@@ -550,7 +563,7 @@ async function level2(t){
     clearWorn();showPose('point');glow(id);SFX.sparkle();$('#skipBtn').classList.add('hidden');
     const it=BY[id];const wk=it.verb==='戴'?'want_this_dai':'want_this';
     await boboMain(wk,LINE_TEXT[wk]+itemImg(id));if(!alive(t))return;
-    tip('Say it in Chinese!');
+    tip(IS_TOUCH?'Tap the microphone and say it in Chinese!':'Say it in Chinese!');
     const hint=txt=>{const s=norm(txt);if(!s)return null;
       if(/裤/.test(s)&&(id==='duanku'||id==='changku'))return 'ku_q';
       if(/袖|衣/.test(s)&&(id==='duanxiu'||id==='changxiu'))return 'xiu_q';return null};
@@ -615,7 +628,7 @@ async function level3(t){
     SFX.ding();addStar();boboAnim('jump');await bobo(w==='cold'?'warm':'cool');if(!alive(t))return;
     const ids=[...worn];
     await boboMain('what_wear');if(!alive(t))return;
-    tip('What is Bobo wearing? Say it in Chinese!');
+    tip(IS_TOUCH?'Tap the mic! What is Bobo wearing? Say it in Chinese!':'What is Bobo wearing? Say it in Chinese!');
     const first=ITEMS.find(i=>i.slot==='coat'&&worn.has(i.id))||ITEMS.find(i=>i.slot==='bottom'&&worn.has(i.id))||ITEMS.find(i=>worn.has(i.id));
     const mv=first.verb==='戴'?'wo_dai':'wo_chuan';
     const found=await listenLoop(t,ids,{model:{keys:['gen_wo_shuo',mv,'w_'+first.id],show:'跟我说：'+LINE_TEXT[mv]+hl(first.name)}});
