@@ -202,7 +202,7 @@ img{-webkit-user-drag:none;pointer-events:none}
   </div>
 
   <canvas id="fx" width="1600" height="900"></canvas>
-  <div id="checkPanel" class="off"><div class="ckHead">Check recordings <button class="btn" id="checkClose">✕</button></div><div id="checkList"></div></div>
+  <div id="checkPanel" class="off"><div class="ckHead">Check recordings <span id="audState" style="font-size:22px;color:#888;margin-left:16px"></span> <button class="btn" id="checkClose">✕</button></div><div id="checkList"></div></div>
 </div></div>
 
 <script>
@@ -252,8 +252,8 @@ function silentUrl(){const sr=8000,n=sr/2,b=new ArrayBuffer(44+n*2),v=new DataVi
   w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
   return URL.createObjectURL(new Blob([b],{type:'audio/wav'}))}
 let keepAlive=null;
-function iosUnlock(){try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}
-  try{if(!keepAlive){keepAlive=new Audio(silentUrl());keepAlive.loop=true;keepAlive.setAttribute('playsinline','');}keepAlive.play().catch(()=>{})}catch(e){}}
+function iosUnlock(){let hasSess=false;try{if(navigator.audioSession){navigator.audioSession.type='playback';hasSess=true}}catch(e){}
+  if(!hasSess)try{if(!keepAlive){keepAlive=new Audio(silentUrl());keepAlive.loop=true;keepAlive.setAttribute('playsinline','');}keepAlive.play().catch(()=>{})}catch(e){}}
 function ac(){iosUnlock();if(!AC){AC=new (window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=.8;master.connect(AC.destination);
   musicGain=AC.createGain();musicGain.gain.value=.0;musicGain.connect(master)}if(AC.state==='suspended')AC.resume();return AC}
 function tone(f,t0,d,type='sine',g=.25,dest){const a=ac(),o=a.createOscillator(),v=a.createGain();o.type=type;o.frequency.setValueAtTime(f,t0);
@@ -300,7 +300,8 @@ function decodeAll(){if(decoding)return decoding;const a=ac();
 function playClip(k){return new Promise(async res=>{
   const a=ac();if(!BUF[k]){try{await decodeAll()}catch(e){}}
   const buf=BUF[k];
-  if(buf){try{if(a.state!=='running')await a.resume()}catch(e){}
+  if(buf&&a.state!=='running'){try{await Promise.race([a.resume(),sleep(400)])}catch(e){}}
+  if(buf&&a.state==='running'){
     const src=a.createBufferSource();src.buffer=buf;const g=a.createGain();g.gain.value=1.0;src.connect(g);g.connect(a.destination);
     curSrc=src;let done=false;const fin=()=>{if(done)return;done=true;res()};src.onended=fin;setTimeout(fin,buf.duration*1000+800);src.start();return}
   // fallback: HTML audio
@@ -636,12 +637,26 @@ async function level3(t){
 (function(){const p=$('#checkList');
   p.innerHTML=Object.keys(LINE_TEXT).map(k=>`<div class="ck" data-k="${k}"><span class="pl">▶</span>${LINE_TEXT[k]}</div>`).join('');
   p.addEventListener('click',e=>{const d=e.target.closest('.ck');if(!d)return;ac();decodeAll();stopVoice();p.querySelectorAll('.ck').forEach(x=>x.classList.remove('on'));d.classList.add('on');playClip(d.dataset.k).then(()=>d.classList.remove('on'))});
-  $('#checkBtn').onclick=()=>{SFX.click();$('#checkPanel').classList.remove('off')};
+  $('#checkBtn').onclick=()=>{SFX.click();$('#checkPanel').classList.remove('off');const up=()=>{$('#audState').textContent='audio: '+(AC?AC.state:'none')+' · clips '+Object.keys(BUF).length+'/'+Object.keys(AU).length};up();setTimeout(up,800)};
   $('#checkClose').onclick=()=>{stopVoice();$('#checkPanel').classList.add('off')};
 })();
 
 /* ================= start ================= */
-addEventListener('pointerdown',()=>{try{ac();decodeAll()}catch(e){}},{once:true});
+let htmlPrimed=false,ttsPrimed=false;
+function gestureUnlock(){
+  try{const a=ac();
+    if(a.state!=='running'){a.resume().catch(()=>{})}
+    // play a tiny silent buffer inside the gesture (classic iOS unlock)
+    const b=a.createBuffer(1,1,22050),src=a.createBufferSource();src.buffer=b;src.connect(a.destination);src.start(0);
+    decodeAll();
+  }catch(e){}
+  // unlock every HTML audio element too (fallback path)
+  if(!htmlPrimed){htmlPrimed=true;for(const k in AUD){const el=AUD[k];try{el.muted=true;const p=el.play();if(p&&p.then)p.then(()=>{el.pause();el.currentTime=0;el.muted=false}).catch(()=>{el.muted=false})}catch(e){}}}
+  // iOS needs the first speech synthesis call inside a gesture
+  if(!ttsPrimed&&'speechSynthesis' in window){ttsPrimed=true;try{const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}catch(e){}}
+}
+['touchend','click','keydown'].forEach(ev=>addEventListener(ev,gestureUnlock,{capture:true,passive:true}));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&AC&&AC.state!=='running')AC.resume().catch(()=>{})});
 if(!SR){$('#micWarn').textContent='Levels 2 and 3 use the microphone. Please open this game in Chrome or Edge on a computer.'}
 else{$('#micWarn').textContent='Tip: allow the microphone when asked. An internet connection is needed for speech recognition.'}
 
