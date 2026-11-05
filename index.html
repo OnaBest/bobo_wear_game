@@ -363,14 +363,14 @@ function listen(ids,ms=7000){
     if(!SR){res({ok:false,text:'',err:'nosr'});return}
     const r=new SR();rec=r;r.lang='zh-CN';r.interimResults=true;r.maxAlternatives=5;r.continuous=false;
     let all='',found=[],ended=false;
-    const fin=(err)=>{if(ended)return;ended=true;listeningNow=false;try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}try{if(AC&&AC.state!=='running')AC.resume().catch(()=>{})}catch(e){}setMusicVol();$('#mic').classList.remove('listen');clearTimeout(to);try{r.abort()}catch(e){}res({ok:found.length>0,found,text:all,err})};
+    const fin=(err)=>{if(ended)return;ended=true;listeningNow=false;try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}try{if(AC&&AC.state!=='running')AC.resume().catch(()=>{})}catch(e){}setMusicVol();$('#mic').classList.remove('listen');clearTimeout(to);try{r.abort()}catch(e){}if(err)lastSRerr=err;res({ok:found.length>0,found,text:all,err})};
     r.onresult=e=>{let txt=[];for(let i=0;i<e.results.length;i++){for(let j=0;j<e.results[i].length;j++)txt.push(e.results[i][j].transcript)}
       all=e.results[e.results.length-1][0].transcript;$('#heard').textContent='Heard: '+all;
       const f=findItems(txt.join('|'),ids);if(f.length){found=f;if(ids.length===1)fin()}};
     r.onerror=e=>fin(e.error);r.onend=()=>fin();
     const to=setTimeout(()=>fin('timeout'),ms);
     $('#heard').textContent='';
-    stopVoice();try{if(navigator.audioSession)navigator.audioSession.type='play-and-record'}catch(e){}
+    stopVoice();micUsed=true;try{if(navigator.audioSession)navigator.audioSession.type='play-and-record'}catch(e){}
     try{r.start();listeningNow=true;setMusicVol();SFX.listen();$('#mic').classList.add('listen')}catch(e){fin('start')}
   });
 }
@@ -483,7 +483,7 @@ document.querySelectorAll('.card').forEach(c=>c.onclick=()=>{SFX.click();startLe
 $('#homeBtn').onclick=()=>{SFX.click();resetGame();renderSelect();show('select')};
 $('#menuBtn').onclick=$('#homeBtn').onclick;
 let curLevel=1;$('#againBtn').onclick=()=>{SFX.click();startLevel(curLevel)};
-function startLevel(n){resetGame();curLevel=n;show('game');[null,level1,level2,level3][n](RUN)}
+function startLevel(n){try{if(AC&&AC.state!=='running'){rebuildAC()}}catch(e){}resetGame();curLevel=n;show('game');[null,level1,level2,level3][n](RUN)}
 async function finish(t,stars){if(!alive(t))return;saveBest(curLevel,stars);cellHandler=null;boboClickHandler=null;glow(null);tip(null);
   $('#mic').classList.add('hidden');$('#doneBtn').classList.add('hidden');$('#skipBtn').classList.add('hidden');
   showPose(null);snow=null;$('#winOverlay').classList.add('hidden');SFX.fanfare();confetti();boboAnim('dance');
@@ -650,14 +650,17 @@ async function level3(t){
 (function(){const p=$('#checkList');
   p.innerHTML=Object.keys(LINE_TEXT).map(k=>`<div class="ck" data-k="${k}"><span class="pl">▶</span>${LINE_TEXT[k]}</div>`).join('');
   p.addEventListener('click',e=>{const d=e.target.closest('.ck');if(!d)return;ac();decodeAll();stopVoice();p.querySelectorAll('.ck').forEach(x=>x.classList.remove('on'));d.classList.add('on');playClip(d.dataset.k).then(()=>d.classList.remove('on'))});
-  $('#checkBtn').onclick=()=>{SFX.click();$('#checkPanel').classList.remove('off');const up=()=>{$('#audState').textContent='audio: '+(AC?AC.state:'none')+' · clips '+Object.keys(BUF).length+'/'+Object.keys(AU).length};up();setTimeout(up,800)};
+  $('#checkBtn').onclick=()=>{SFX.click();$('#checkPanel').classList.remove('off');const up=()=>{$('#audState').textContent='audio: '+(AC?AC.state:'none')+' · clips '+Object.keys(BUF).length+'/'+Object.keys(AU).length+' · session: '+(navigator.audioSession?navigator.audioSession.type:'n/a')+(lastSRerr?' · mic: '+lastSRerr:'')};up();setTimeout(up,800)};
   $('#checkClose').onclick=()=>{stopVoice();$('#checkPanel').classList.add('off')};
 })();
 
 /* ================= start ================= */
 let htmlPrimed=false,ttsPrimed=false;
+let micUsed=false,lastSRerr='';
+function rebuildAC(){try{AC.close()}catch(e){}AC=null;ac();if(musicTimer){clearInterval(musicTimer);musicTimer=null;startMusic()}}
 function gestureUnlock(){
-  try{const a=ac();
+  try{if(AC&&AC.state!=='running'&&AC.state!=='closed'&&micUsed){micUsed=false;rebuildAC()}
+    const a=ac();
     if(a.state!=='running'){a.resume().catch(()=>{})}
     // play a tiny silent buffer inside the gesture (classic iOS unlock)
     const b=a.createBuffer(1,1,22050),src=a.createBufferSource();src.buffer=b;src.connect(a.destination);src.start(0);
