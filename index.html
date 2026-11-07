@@ -254,8 +254,8 @@ function silentUrl(){const sr=8000,n=sr/2,b=new ArrayBuffer(44+n*2),v=new DataVi
   w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
   return URL.createObjectURL(new Blob([b],{type:'audio/wav'}))}
 let keepAlive=null;
-function iosUnlock(){let hasSess=false;try{if(navigator.audioSession){navigator.audioSession.type='playback';hasSess=true}}catch(e){}
-  if(!hasSess)try{if(!keepAlive){keepAlive=new Audio(silentUrl());keepAlive.loop=true;keepAlive.setAttribute('playsinline','');}keepAlive.play().catch(()=>{})}catch(e){}}
+function iosUnlock(){if(typeof listeningNow!=='undefined'&&listeningNow)return;let hasSess=false;try{if(navigator.audioSession){navigator.audioSession.type='playback';hasSess=true}}catch(e){}
+  if(!hasSess)try{if(!keepAlive){keepAlive=new Audio(silentUrl());keepAlive.loop=true;keepAlive.setAttribute('playsinline','');}if(keepAlive.paused)keepAlive.play().catch(()=>{})}catch(e){}}
 function ac(){iosUnlock();if(!AC){AC=new (window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=.8;master.connect(AC.destination);
   musicGain=AC.createGain();musicGain.gain.value=.0;musicGain.connect(master)}if(AC.state==='suspended')AC.resume();return AC}
 function tone(f,t0,d,type='sine',g=.25,dest){const a=ac(),o=a.createOscillator(),v=a.createGain();o.type=type;o.frequency.setValueAtTime(f,t0);
@@ -291,8 +291,8 @@ const LINE_TEXT={
  h_leg_cold:'腿好冷呀！换成长裤吧！',h_coat:'还是好冷呀！穿上外套吧！',h_shoes:'脚好冷呀！穿上鞋子吧！',h_coat_off:'好热呀！把外套脱掉吧！',
  h_shorts:'好热呀！换成短裤吧！',h_tee:'好热呀！换成短袖吧！',warm:'好暖和呀！谢谢你！',cool:'好凉快呀！谢谢你！',what_wear:'你给我穿了什么？',
  wo_chuan:'我穿了',wo_dai:'我戴了',done:'我穿好啦！谢谢你！'};
-const AUD={};
-for(const k in AU){const a=new Audio(AU[k]);a.preload='auto';AUD[k]=a}
+// one shared fallback player (unlocked once with silence; never pre-plays real clips)
+const FB=new Audio();FB.preload='auto';FB.setAttribute('playsinline','');
 let curAudio=null,speakingNow=false,listeningNow=false;
 function setMusicVol(){if(!musicGain)return;const v=!musicOn?0:(speakingNow||listeningNow)?.05:.3;musicGain.gain.setTargetAtTime(v,AC.currentTime,.15)}
 const BUF={};let decoding=null,curSrc=null;
@@ -307,8 +307,8 @@ function playClip(k){return new Promise(async res=>{
     const src=a.createBufferSource();src.buffer=buf;const g=a.createGain();g.gain.value=1.0;src.connect(g);g.connect(a.destination);
     curSrc=src;let done=false;const fin=()=>{if(done)return;done=true;res()};src.onended=fin;setTimeout(fin,buf.duration*1000+800);src.start();return}
   // fallback: HTML audio
-  const el=AUD[k];if(!el){res();return}
-  try{el.pause();el.currentTime=0}catch(e){}curAudio=el;let done=false;const fin=()=>{if(done)return;done=true;el.onended=null;res()};
+  if(!AU[k]){res();return}const el=FB;
+  try{el.pause();el.src=AU[k];el.currentTime=0}catch(e){}curAudio=el;let done=false;const fin=()=>{if(done)return;done=true;el.onended=null;res()};
   el.onended=fin;el.onerror=fin;setTimeout(fin,(el.duration&&isFinite(el.duration)?el.duration*1000:4000)+600);
   const pr=el.play();if(pr&&pr.catch)pr.catch(fin)})}
 function stopVoice(){narrRun++;boboRun++;if(curSrc){try{curSrc.stop()}catch(e){}curSrc=null}if(curAudio){try{curAudio.pause()}catch(e){}}try{speechSynthesis.cancel()}catch(e){}}
@@ -667,7 +667,7 @@ function gestureUnlock(){
     decodeAll();
   }catch(e){}
   // unlock every HTML audio element too (fallback path)
-  if(!htmlPrimed){htmlPrimed=true;for(const k in AUD){const el=AUD[k];try{el.muted=true;const p=el.play();if(p&&p.then)p.then(()=>{el.pause();el.currentTime=0;el.muted=false}).catch(()=>{el.muted=false})}catch(e){}}}
+  if(!htmlPrimed){htmlPrimed=true;try{FB.src=silentUrl();const p=FB.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}}
   // iOS needs the first speech synthesis call inside a gesture
   if(!ttsPrimed&&'speechSynthesis' in window){ttsPrimed=true;try{const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}catch(e){}}
 }
